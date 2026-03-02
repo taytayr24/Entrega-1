@@ -1,0 +1,149 @@
+#Librerias
+from machine import Pin, mem32
+import time
+import random
+
+# SEMILLA ALEATORIA
+random.seed(time.ticks_ms())
+
+# REGISTROS GPIO ESP32
+GPIO_OUT_REG    = 0x3FF44004
+GPIO_ENABLE_REG = 0x3FF44020
+
+# SALIDAS (3 LED + 1 BUZZER)
+outputs_pins = [2, 4, 5, 18]
+
+for pin in outputs_pins:
+    mem32[GPIO_ENABLE_REG] |= (1 << pin)
+
+def set_output(pin, state):
+    if state:
+        mem32[GPIO_OUT_REG] |= (1 << pin)
+    else:
+        mem32[GPIO_OUT_REG] &= ~(1 << pin)
+
+def clear_all():
+    for p in outputs_pins:
+        set_output(p, 0)
+
+# BOTONES
+p1_pins = [12, 13, 14, 27]
+p2_pins = [32, 33, 25, 26]
+
+p1_buttons = [Pin(p, Pin.IN, Pin.PULL_UP) for p in p1_pins]
+p2_buttons = [Pin(p, Pin.IN, Pin.PULL_UP) for p in p2_pins]
+
+stop_button = Pin(23, Pin.IN, Pin.PULL_UP)
+
+# ANTIREBOTE
+def debounce(button):
+    if button.value() == 0:
+        time.sleep_ms(30)
+        if button.value() == 0:
+            while button.value() == 0:
+                pass
+            return True
+    return False
+
+# INTERFAZ INICIAL
+def choose_players():
+    print("\n==== JUEGO DE REFLEJOS ====")
+    print("J1 B1 = 1 jugador")
+    print("J2 B1 = 2 jugadores")
+
+    while True:
+        if debounce(p1_buttons[0]):
+            print("Modo 1 jugador\n")
+            return 1
+        if debounce(p2_buttons[0]):
+            print("Modo 2 jugadores\n")
+            return 2
+
+# JUEGO
+def game():
+
+    players = choose_players()
+    score1 = 0
+    score2 = 0
+
+    while True:
+
+        if debounce(stop_button):
+            clear_all()
+            print("\n=== JUEGO DETENIDO ===")
+            print("Puntaje J1:", score1)
+            print("Puntaje J2:", score2)
+            print("Presione STOP para reiniciar")
+            while not debounce(stop_button):
+                pass
+            return
+
+        clear_all()
+        time.sleep(random.uniform(0.5,3))
+
+        active = random.randint(0,3)
+        tiempo_ronda = random.uniform(1,10)
+
+        print("\nNueva ronda - Tiempo limite:",
+              round(tiempo_ronda,2),"seg")
+
+        set_output(outputs_pins[active],1)
+
+        inicio = time.ticks_ms()
+        responded = False
+
+        while True:
+
+            if stop_button.value() == 0:
+                break
+
+            transcurrido = time.ticks_diff(time.ticks_ms(), inicio)/1000
+
+            if transcurrido >= tiempo_ronda:
+                print("Tiempo agotado")
+                break
+
+            #JUGADOR 1
+            for i,btn in enumerate(p1_buttons):
+                if debounce(btn):
+                    tiempo_reaccion = time.ticks_diff(
+                        time.ticks_ms(), inicio)
+
+                    if i == active:
+                        score1 += 2
+                        print("J1 Correcto +2")
+                        print("Tiempo reaccion J1:",
+                              tiempo_reaccion,"ms")
+                        responded = True
+                        break
+                    else:
+                        score1 -= 1
+                        print("J1 Error -1")
+
+            #JUGADOR 2
+            if players == 2:
+                for i,btn in enumerate(p2_buttons):
+                    if debounce(btn):
+                        tiempo_reaccion = time.ticks_diff(
+                            time.ticks_ms(), inicio)
+
+                        if i == active:
+                            score2 += 2
+                            print("J2 Correcto +2")
+                            print("Tiempo reaccion J2:",
+                                  tiempo_reaccion,"ms")
+                            responded = True
+                            break
+                        else:
+                            score2 -= 1
+                            print("J2 Error -1")
+
+            if responded:
+                break
+
+        print("Puntaje -> J1:",score1," | J2:",score2)
+        clear_all()
+        
+# LOOP INFINITO
+while True:
+    game()
